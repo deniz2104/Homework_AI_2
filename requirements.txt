@@ -10,3 +10,5 @@ torchvision
 pillow
 tqdm
 matplotlib
+spacy
+emoji
