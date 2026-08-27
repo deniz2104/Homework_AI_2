@@ -1,0 +1,21 @@
+Model Type,Augmentation,Model Index,Accuracy
+MLP,No,1,55.6
+MLP,No,2,58.1
+MLP,No,3,57.4
+MLP,No,4,59.1
+MLP,No,5,57.8
+CNN,No,1,10.0
+CNN,No,2,80.0
+CNN,No,3,78.2
+CNN,No,4,10.0
+CNN,No,5,79.7
+MLP,Yes,1,65.4
+MLP,Yes,2,66.8
+MLP,Yes,3,68.3
+MLP,Yes,4,67.1
+MLP,Yes,5,63.6
+CNN,Yes,1,10.0
+CNN,Yes,2,13.1
+CNN,Yes,3,78.8
+CNN,Yes,4,10.0
+CNN,Yes,5,81.9
