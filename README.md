@@ -113,7 +113,7 @@ flowchart LR
     HV --> EV
 ```
 
-Pentru fiecare combinație (MLP/CNN × cu/fără augmentare) s-au testat toate combinațiile  de la Top-1 la Top-5, cu Soft-Vote+TTA (1-4 augmentări: aceeasi imagine, flip orizontal, flip vertical, rotație 90°) și Hard-Voting.
+Pentru fiecare combinație (MLP/CNN × cu/fără augmentare) s-au testat toate combinațiile de la Top-1 la Top-5, cu Soft-Vote+TTA (1-4 augmentări: aceeași imagine, flip orizontal, flip vertical, rotație 90°) și Hard-Voting.
 
 **De ce Test-Time Augmentation.** La evaluare, fiecare imagine de test trece prin model în mai multe variante (identitate, flip orizontal, flip vertical, rotație 90°), iar probabilitățile softmax rezultate sunt mediate înainte de decizia finală. 
 
@@ -128,7 +128,7 @@ E o tehnică fără cost de antrenare: modelele rămân aceleași, doar inferen�
 | MLP | Da | Top-3, Soft-Vote TTA-1 | 52.56% | 51.93% |
 | MLP | Nu | Top-5, Soft-Vote TTA-2 | 48.90% | 48.95% |
 
-CNN depășește constant MLP cu 25-30 procente, iar augmentarea aduce un câștig pentru ambele arhitecturi. Principala limitare rămâne, dimensiunea și complexitatea vizuală a datelor, nu strategia de augmentare.
+CNN depășește constant MLP cu 25-30 procente, iar augmentarea aduce un câștig pentru ambele arhitecturi. Principala limitare rămâne dimensiunea și complexitatea vizuală a datelor, nu strategia de augmentare.
 
 <table><tr>
 <td><img src="imagebits/results/CNN_Aug/training_curves/CNN_Aug_model_3_acc_curve.png" width="420"></td>
@@ -151,7 +151,7 @@ Matricea de confuzie a celui mai bun ansamblu arată o diagonală puternică pen
 
 ![Distribuția claselor pe antrenare](land_patches/results/dataset_distribution/land_patches_train_dist.png)
 
-Ca și la Imagebits, dataset-ul este echilibrat per clasă, dar raportul dintre testare și antrenare+validare este mult mai mare aici, iar estimarea de test devine mai stabilă.
+Ca și la Imagebits, dataset-ul este echilibrat per clasă, dar raportul dintre testare și antrenare+validare este mult mai mare aici, iar estimarea de test devine mai stabilă. Setul de date fusese deja împărțit.
 
 ### Analiza exploratorie
 
@@ -163,19 +163,31 @@ Fiind imagini satelitare, variabilitatea vizuală e de altă natură decât la I
 
 ![Imaginea medie per clasă](land_patches/results/eda/average_images.png)
 
-Spre deosebire de Imagebits, imaginile medii per clasă păstrează aici un caracter cromatic mult mai omogen (de exemplu River și SeaLake rămân predominant albăstrui-verzui în medie). Peisajele din satelit au o textură repetitivă, spre deosebire de varietatea de forme și unghiuri din fotografiile de obiecte.
+Spre deosebire de Imagebits, imaginile medii per clasă păstrează cromatică omogenă (de exemplu River și SeaLake rămân predominant albăstrui-verzui în medie). Peisajele din satelit au o textură repetitivă, spre deosebire de varietatea de forme și unghiuri din fotografiile de obiecte/vietăți.
 
 ### Preprocesare și augmentare
 
-Nefiind nevoie de echilibrare, s-a aplicat un singur strat de augmentare, on-the-fly, mai simplu decât la Imagebits: `RandomRotation(10°)`, `RandomHorizontalFlip`, `RandomVerticalFlip`. S-a renunțat și la label smoothing (`CrossEntropyLoss` standard), iar numărul de epoci a fost mărit de la 60 la 80 și răbdarea early stopping de la 7 la 9. Antrenarea e mai lentă, dar modelul ajunge mai greu la overfitting pe acest set de date.
+Nefiind nevoie de echilibrare a setului de date (train/val/test veneau deja separate și echilibrate), s-a renunțat la stratul de generare sintetică pe disc folosit la Imagebits. A rămas un singur strat de augmentare, on-the-fly, aplicat direct în `DataLoader`: `RandomRotation(10°)`, `RandomHorizontalFlip(p=0.4)`, `RandomVerticalFlip(p=0.4)`.
+
+**De ce aceste transformări.** Spre deosebire de Imagebits, unde obiectele au o orientare naturală (un cal stă pe picioare, o mașină stă pe roți), imaginile satelitare sunt privite direct de sus, fără o orientare canonică:
+- `RandomRotation(10°)`: rotația nu riscă să strice sensul imaginii, pentru că un câmp sau o pădure rămân la fel de plauzibile la orice unghi, fără un "sus" corect.
+- `RandomHorizontalFlip` și `RandomVerticalFlip` (ambele cu probabilitate 0.4): la o imagine văzută de sus, oglindirea pe oricare axă produce tot o imagine plauzibilă a aceleiași clase de teren. La Imagebits, un flip vertical ar fi întors obiectele cu susul în jos și le-ar fi făcut nerealiste, de-asta a fost evitat acolo; aici, absența unei orientări fixe face flip-ul vertical la fel de sigur ca cel orizontal.
+
+**De ce nu s-au mai folosit `ColorJitter` sau `RandomCrop`/`RandomResizedCrop`.** La Imagebits, clasele se disting mai ales prin formă și contur (pisică vs. câine), deci variațiile de iluminare sau încadrare ajutau modelul să ignore detalii nerelevante. La LandPatches, clasele sunt definite în bună parte de culoare și textură (River/SeaLake albăstrui, Forest verde-închis, AnnualCrop verde-gălbui uniform, vezi imaginile medii per clasă de mai sus), iar a distorsiona artificial culoarea ar risca să șteargă tocmai semnalul care separă clasele. La fel, patch-urile de teren sunt relativ omogene pe toată suprafața, fără un obiect central de recadrat, deci un crop aleator ar aduce mai puțin beneficiu decât la Imagebits, unde simula translația unui obiect în cadrul unei scene mai largi.
+
+**De ce fără label smoothing.** La Imagebits, `label_smoothing=0.1` compensa riscul adus de exemplele sintetice generate pe disc, uneori aproape identice între ele, care puteau face modelul excesiv de încrezător. Aici nu există augmentare pe disc, iar granițele dintre clasele vizual apropiate (HerbaceousVegetation vs. PermanentCrop, Highway vs. River) sunt oricum estompate de conținutul real al imaginilor, fără ajutorul unor duplicate sintetice; s-a preferat `CrossEntropyLoss` simplu, ca modelul să poată învăța granițe de decizie cât mai clare acolo unde diferența reală dintre clase e mică.
+
+**De ce mai multe epoci (80 vs. 60) și patience mai mare la early stopping (9 vs. 7).** Augmentarea on-the-fly de aici e mai simplă (3 transformări, fără `ColorJitter`/crop) decât cea de la Imagebits, deci fiecare epocă introduce mai puțină varietate în datele văzute de model, iar convergența e mai lentă. O răbdare mai mare la early stopping evită oprirea prematură, mai frecventă atunci când augmentarea e mai blândă și progresul de la o epocă la alta e mai mic.
 
 ### Arhitecturi
 
-Aceleași arhitecturi ca la Imagebits (`ImprovedMLP` 512-256-128 și `CNN` cu trei blocuri Conv-Conv-Pool), adaptate la dimensiunea de intrare de 64×64 și cu dropout ușor redus pentru MLP.
+Aceleași arhitecturi ca la Imagebits (`ImprovedMLP` 512-256-128 și `CNN` cu trei blocuri Conv-Conv-Pool), adaptate la dimensiunea de intrare de 64×64 și cu dropout ușor redus pentru MLP (0.2 vs. 0.35 la Imagebits, întrucât aici nu mai există riscul de overfitting pe exemple sintetice aproape duplicate).
 
 ### Ensembling
 
-Aceeași procedură Top-k + Soft-Vote/TTA + Hard-Voting descrisă la Imagebits, aplicată aici cu `ensemble_configs` diferite (learning rate mai mare, 3e-3, potrivit pentru un număr mai mare de epoci).
+Aceeași procedură Top-k + Soft-Vote/TTA + Hard-Voting descrisă la Imagebits, aplicată aici cu `ensemble_configs` diferite: toate cele 5 modele pornesc de la `lr=3e-3` (față de 5e-4–7e-4 la Imagebits) și variază doar `weight_decay` între ele.
+
+**De ce un learning rate mai mare.** `CosineAnnealingLR` scade rata de învățare lin, până aproape de zero, pe durata a `T_max=epochs`. Cu 80 de epoci (față de 60 la Imagebits), un punct de plecare la fel de mic ca acolo ar fi petrecut prea mult timp aproape de minimul curbei, fără progres real. Rata de 3e-3 lasă loc de scădere pe un orizont mai lung. Totuși, cum arată secțiunea de mai jos, s-a dovedit și prea agresivă pentru inițializarea CNN, care a colapsat în 3 din 5 rulări din ansamblu.
 
 ### Rezultate
 
@@ -199,16 +211,19 @@ Confuziile principale ale ansamblului apar între clase cu textură similară di
 
 ### Observații și limitări
 
-Un rezultat care nu apare în rezultatele finale, dar e vizibil în `land_patches/results/land_patches_model_accuracies_summary.csv`: **3 din cele 5 modele CNN antrenate (atât cu, cât și fără augmentare) au colapsat la ~10% acuratețe** (nivelul de șansă pentru 10 clase) încă din prima epocă, în timp ce celelalte modele CNN din același ansamblu au ajuns la 78-82%. Curba de acuratețe a unui astfel de model rămâne plată la un singur punct, semn de divergență imediată, nu de antrenare eșuată treptat. Cauza cea mai probabilă este learning rate-ul de 3e-3, ales pentru a compensa numărul mai mare de epoci, dar prea agresiv pentru inițializarea CNN pe acest set de date. MLP, cu aceeași configurație, nu a avut aceeași problemă. Modulul de selecție Top-k elimină automat modelele eșuate din ansamblu (sunt clasate ultimele după acuratețea pe validare), așa că rezultatul final de ansamblu nu e afectat. Rata de eșec de 60% pe arhitectura CNN arată totuși clar că rata de învățare ar trebui redusă sau însoțită de warm-up la o rulare viitoare.
+Un rezultat care nu apare în rezultatele finale, dar e vizibil în `land_patches/results/land_patches_model_accuracies_summary.csv`: **3 din cele 5 modele CNN antrenate (atât cu, cât și fără augmentare) au colapsat la ~10% acuratețe** (nivelul de șansă pentru 10 clase) încă din prima epocă, în timp ce celelalte modele CNN din același ansamblu au ajuns la 78-82%. Curba de acuratețe a unui astfel de model rămâne plată la un singur punct, semn de divergență imediată, nu de antrenare eșuată treptat. 
+
+Cauza cea mai probabilă este learning rate-ul de 3e-3, ales pentru a compensa numărul mai mare de epoci, dar prea agresiv pentru inițializarea CNN pe acest set de date. MLP, cu aceeași configurație, nu a avut aceeași problemă. 
+
+Modulul de selecție Top-k elimină automat modelele eșuate din ansamblu (sunt clasate ultimele după acuratețea pe validare), așa că rezultatul final de ansamblu nu e afectat. Rata de eșec de 60% pe arhitectura CNN arată totuși clar că rata de învățare ar trebui redusă sau însoțită de warm-up la o rulare viitoare.
 
 ---
 
 ## Concluzii comparative
 
-- **CNN a fost superior MLP-ului pe ambele seturi de date**, cu o marjă de 25-30 puncte procentuale: arhitectura convoluțională exploatează structura spațială a imaginilor, pe când MLP-ul tratează fiecare pixel independent după flatten.
+- **CNN a fost superior MLP-ului pe ambele seturi de date**, cu o marjă semnificativă: arhitectura convoluțională exploatează structura spațială a imaginilor, pe când MLP-ul tratează fiecare pixel independent după flatten.
 - **Augmentarea a ajutat mai mult la Imagebits**, pentru care adresa direct problema volumului mic de date, **decât la LandPatches**, unde dataset-ul era deja suficient de mare. La CNN pe LandPatches, augmentarea nu a adus practic niciun câștig față de varianta fără augmentare (80.96% vs. 81.90%).
 - **Ensembling-ul cu Soft-Vote și TTA a fost constant metoda câștigătoare** față de Hard-Voting, în ambele capitole: probabilitățile medii softmax păstrează mai multă informație decât un simplu vot majoritar.
-- Cele mai mari provocări au fost diferite pe cele două seturi de date: la Imagebits, variabilitatea intra-clasă a fotografiilor; la LandPatches, instabilitatea antrenării CNN la learning rate ridicat.
 
 ## Structura repository-ului
 
@@ -227,7 +242,13 @@ land_patches/
   train/, test/, val/     (datele brute, nu sunt urcate în git)
   results/                (aceeași structură ca mai sus, plus dataset_distribution/)
 
+sentiment_analysis/
+  results/
+    eda/                 (analiza exploratorie a textelor: distribuție clase, n-grame, lungimi)
+  (readme separat pentru acest capitol, în lucru)
+
 imagebits.ipynb           (notebook complet, cu toate output-urile)
 land_patches.ipynb        (notebook complet, cu toate output-urile)
+sentiment_analysis_romanian_text.ipynb (notebook complet, cu toate output-urile)
 tema2_denis_hatu_raport.pdf (raportul inițial al temei)
 ```
