@@ -41,7 +41,7 @@ Exemplele de mai sus arată direct sursa acestei variabilități: aceeași clas�
 
 ![Distribuția RGB per clasă](imagebits/results/eda/rgb_distribution.png)
 
-Analiza de corelație intra-clasă vs. inter-clasă (disponibilă direct în `imagebits.ipynb`, nu a fost salvată separat ca imagine) a arătat un scor de separabilitate pozitiv, dar mic: imaginile din aceeași clasă sunt doar puțin mai similare între ele decât cele din clase diferite. Practic, e o problemă de clasificare dificilă pentru un model simplu.
+Analiza de corelație intra-clasă vs. inter-clasă (disponibilă direct în `imagebits.ipynb`) a arătat un scor de separabilitate pozitiv, dar mic: imaginile din aceeași clasă sunt doar puțin mai similare între ele decât cele din clase diferite. Practic, e o problemă de clasificare dificilă pentru un model simplu.
 
 ![Imaginea medie per clasă](imagebits/results/eda/average_images.png)
 
@@ -68,6 +68,17 @@ flowchart TD
 
 Primul strat generează exemple noi pe disc, aplicate **numai după** separarea train/validare/test, tocmai pentru a evita data leakage (dacă imagini foarte similare ajung și în antrenare și în validare, acuratețea pe validare devine bună într-un mod artificial). Al doilea strat e augmentare dinamică, aplicată la fiecare epocă direct în `DataLoader`, cu scopul de a generaliza modelul cu detaliile mixte ale imaginilor.
 
+**De ce aceste transformări.** Stratul de generare sintetică produce imagini care rămân pe disc ca exemple permanente, deci transformările trebuie să arate ca poze plauzibile, nu doar variații agresive de antrenare:
+- `RandomRotation ±8°`: robustețe la unghiuri de fotografiere ușor diferite, fără a distorsiona obiectul (o rotație mare ar strica ințelesul general al imaginilor, de exemplu o mașină cu roțile în sus).
+- `RandomResizedCrop`: simulează variații de scală și încadrare, utile pentru ca modelul să recunoască obiectul indiferent cât de aproape sau departe apare în cadru.
+- `RandomHorizontalFlip`: majoritatea claselor (mașină, animal, avion) pot fi oglindite, deci oferă invarianță la orientare.
+- `ColorJitter` ușor: simulează condiții de iluminare diferite, pentru robustețe la lumină fără a schimba identitatea obiectului.
+
+Stratul on-the-fly nu trebuie să producă o poză nouă, doar să miște ușor imaginea existentă la fiecare epocă:
+- `RandomCrop` cu padding: simulează mici deplasări ale obiectului în cadru, iar padding-ul completează marginile ca să nu se piardă conținut la tăiere.
+- `RandomHorizontalFlip` și `RandomRotation`: aceleași beneficii de invarianță ca mai sus, dar aplicate dinamic, astfel încât modelul nu vede niciodată exact aceeași imagine de două ori, ceea ce reduce memorarea (overfitting).
+- `ColorJitter`: robustețe suplimentară la iluminare, aplicată constant pe tot parcursul antrenării.
+
 ### Arhitecturi
 
 ```mermaid
@@ -84,6 +95,12 @@ flowchart LR
 
 Ambele modele sunt antrenate în ansambluri de câte 5, cu configurații ușor diferite de learning rate și weight decay (AdamW, `CosineAnnealingLR`, early stopping la 7 epoci fără progres, `CrossEntropyLoss` cu label smoothing 0.1).
 
+**De ce `CosineAnnealingLR`.** Rata de învățare scade lin, pe o curbă cosinus, de la valoarea maximă spre (1e-6), fără salturile bruște ale unei scăderi în trepte. Practic, pașii de optimizare sunt mari la început, când modelul are cel mai mult de învățat, și tot mai mici spre final, când e nevoie de rafinare fină în jurul unui minim.
+
+**De ce label smoothing (0.1).** Fără el, `CrossEntropyLoss` împinge modelul să prezică o probabilitate cât mai apropiată de 100% pentru clasa corectă, ceea ce duce la un model încrezător și prost calibrat, predispus la overfitting. 
+
+Label smoothing înlocuiește eticheta one-hot cu un amestec între eticheta reală și o distribuție uniformă pe toate clasele. Beneficiul contează în mod special aici, unde volumul mic de date reale și exemplele sintetice adăugate cresc riscul de overfitting.
+
 ### Ensembling
 
 ```mermaid
@@ -96,7 +113,11 @@ flowchart LR
     HV --> EV
 ```
 
-Pentru fiecare combinație (MLP/CNN × cu/fără augmentare) s-au testat toate dimensiunile de ansamblu de la Top-1 la Top-5, cu Soft-Vote+TTA (1-4 augmentări: identitate, flip orizontal, flip vertical, rotație 90°) și Hard-Voting.
+Pentru fiecare combinație (MLP/CNN × cu/fără augmentare) s-au testat toate combinațiile  de la Top-1 la Top-5, cu Soft-Vote+TTA (1-4 augmentări: aceeasi imagine, flip orizontal, flip vertical, rotație 90°) și Hard-Voting.
+
+**De ce Test-Time Augmentation.** La evaluare, fiecare imagine de test trece prin model în mai multe variante (identitate, flip orizontal, flip vertical, rotație 90°), iar probabilitățile softmax rezultate sunt mediate înainte de decizia finală. 
+
+E o tehnică fără cost de antrenare: modelele rămân aceleași, doar inferența rulează pe fiecare imagine. Motivul principal e robustețea: o predicție pe o singură versiune a imaginii poate fi greșită din întâmplare (de exemplu modelul poate fi mai sigur pe varianta oglindită decât pe cea originală), iar media peste mai multe variante reduce acest risc și scade șansa unei predicții greșite, dar încrezătoare.
 
 ### Rezultate
 
@@ -107,7 +128,7 @@ Pentru fiecare combinație (MLP/CNN × cu/fără augmentare) s-au testat toate d
 | MLP | Da | Top-3, Soft-Vote TTA-1 | 52.56% | 51.93% |
 | MLP | Nu | Top-5, Soft-Vote TTA-2 | 48.90% | 48.95% |
 
-CNN depășește constant MLP cu 25-30 puncte procentuale, iar augmentarea aduce un câștig de 2-4 puncte pentru ambele arhitecturi: util, dar nu spectaculos. Principala limitare rămâne, probabil, dimensiunea și complexitatea vizuală a datelor, nu strategia de augmentare.
+CNN depășește constant MLP cu 25-30 procente, iar augmentarea aduce un câștig pentru ambele arhitecturi. Principala limitare rămâne, dimensiunea și complexitatea vizuală a datelor, nu strategia de augmentare.
 
 <table><tr>
 <td><img src="imagebits/results/CNN_Aug/training_curves/CNN_Aug_model_3_acc_curve.png" width="420"></td>
