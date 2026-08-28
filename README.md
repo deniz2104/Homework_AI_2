@@ -1,11 +1,11 @@
 # Recunoaștere de imagini: Imagebits și LandPatches
 
-Acest proiect acoperă a doua temă la Inteligență Artificială și tratează două probleme de clasificare a imaginilor, rezolvate cu același pipeline de bază: analiză exploratorie a datelor (EDA), augmentare, antrenare a unui ansamblu de modele MLP și CNN, apoi combinarea lor prin ensembling cu Test-Time Augmentation (TTA) și hard voting.
+Acest proiect acoperă a doua temă de la Învățare Automată și tratează două probleme de clasificare a imaginilor, rezolvate cu același pipeline de bază: analiză exploratorie a datelor (EDA), augmentare, antrenare a unui ansamblu de modele MLP și CNN, apoi combinarea lor prin ensembling cu Test-Time Augmentation (TTA) și hard voting.
 
 - **Capitolul 1** descrie setul de date **Imagebits** (10 clase de obiecte, imagini 96×96).
 - **Capitolul 2** descrie setul de date **LandPatches** (10 clase de teren, imagini de satelit, 64×64).
 
-Cele două seturi de date au pornit de la premise diferite: Imagebits venea cu foarte puține exemple pe antrenare, iar LandPatches avea deja o împărțire train/val/test echilibrată. Asta a dus la decizii diferite de preprocesare, deși arhitecturile și logica de antrenare au rămas identice. Rezultatele complete (toate configurațiile, toate dimensiunile de ansamblu) se găsesc în `imagebits/results/ensemble_results_summary.csv` și `land_patches/results/land_patches_ensemble_results_summary.csv`; imaginile din acest README sunt doar o selecție reprezentativă din folderele `imagebits/results/` și `land_patches/results/`, unde se află toate cele ~265 de grafice generate.
+Cele două seturi de date au pornit de la premise diferite: Imagebits venea cu un dezavantaj pentru modele: clasele nu erau balansate, iar LandPatches avea deja o împărțire train/val/test echilibrată. Asta a dus la decizii diferite de preprocesare, deși arhitecturile și logica de antrenare au rămas identice. Rezultatele complete se găsesc în `imagebits/results/ensemble_results_summary.csv` și `land_patches/results/land_patches_ensemble_results_summary.csv`; imaginile din acest README sunt doar o selecție reprezentativă din folderele `imagebits/results/` și `land_patches/results/`, unde se află toate graficele generate.
 
 ## Pipeline-ul general
 
@@ -19,7 +19,7 @@ flowchart LR
     F --> G[Evaluare pe test:\nacuratețe, F1, matrice de confuzie]
 ```
 
-Ambele notebook-uri (`imagebits.ipynb`, `land_patches.ipynb`) sunt construite pe același schelet: o clasă `CFG` cu hiperparametrii, funcții de EDA, două arhitecturi (`ImprovedMLP` și `CNN`), o buclă de antrenare cu early stopping și scheduler cosine, și un modul de ensembling cu patru variante de TTA (fără augmentare, flip orizontal, flip vertical, rotație 90°) plus hard voting.
+Ambele notebook-uri (`imagebits.ipynb`, `land_patches.ipynb`) sunt construite pe același schelet: o clasă de configurare cu hiperparametrii, funcții de EDA, două arhitecturi (`ImprovedMLP` și `CNN`), o buclă de antrenare cu early stopping, și un modul de ensembling cu patru variante de TTA (fără augmentare, flip orizontal, flip vertical, rotație 90°) plus hard voting.
 
 ---
 
@@ -28,8 +28,6 @@ Ambele notebook-uri (`imagebits.ipynb`, `land_patches.ipynb`) sunt construite pe
 ### Setul de date
 
 10 clase de obiecte (avion, pasăre, mașină, pisică, cerb, câine, cal, maimuță, navă, camion), imagini RGB de 96×96 pixeli. Problema inițială: setul de antrenare avea prea puține exemple per clasă comparativ cu testarea, ceea ce a motivat generarea de date sintetice.
-
-![Distribuția claselor](imagebits/results/eda/class_distribution.png)
 
 Distribuția e echilibrată per clasă (aproximativ 800 de imagini fiecare), dar volumul total rămâne mic pentru o rețea antrenată de la zero.
 
@@ -68,7 +66,7 @@ flowchart TD
     end
 ```
 
-Primul strat generează exemple noi pe disc, aplicate **numai după** separarea train/validare/test, tocmai pentru a evita data leakage (dacă imagini foarte similare ajung și în antrenare și în validare, acuratețea pe validare devine artificial de optimistă). Al doilea strat e augmentare dinamică, aplicată la fiecare epocă direct în `DataLoader`, cu scopul de a decupla modelul de detaliile fixe ale imaginilor.
+Primul strat generează exemple noi pe disc, aplicate **numai după** separarea train/validare/test, tocmai pentru a evita data leakage (dacă imagini foarte similare ajung și în antrenare și în validare, acuratețea pe validare devine bună într-un mod artificial). Al doilea strat e augmentare dinamică, aplicată la fiecare epocă direct în `DataLoader`, cu scopul de a generaliza modelul cu detaliile mixte ale imaginilor.
 
 ### Arhitecturi
 
