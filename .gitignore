@@ -1,0 +1,16 @@
+# Raw dataset images (large, reproducible from source) — keep results, not raw data
+imagebits/train/
+imagebits/test/
+land_patches/train/
+land_patches/test/
+land_patches/val/
+tema2_denis_hatu_raport.pdf
+Tema 2 InvAut - Enunț.pdf
+
+# Model checkpoints (large binary weights, regenerable by rerunning the notebooks)
+*.pth
+
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
