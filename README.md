@@ -1,11 +1,12 @@
-# Recunoaștere de imagini: Imagebits și LandPatches
+# Recunoaștere de imagini și analiză de sentiment
 
-Acest proiect acoperă a doua temă de la Învățare Automată și tratează două probleme de clasificare a imaginilor, rezolvate cu același pipeline de bază: analiză exploratorie a datelor (EDA), augmentare, antrenare a unui ansamblu de modele MLP și CNN, apoi combinarea lor prin ensembling cu Test-Time Augmentation (TTA) și hard voting.
+Acest proiect acoperă a doua temă de la Învățare Automată și tratează trei probleme de clasificare, rezolvate cu rețele neuronale antrenate de la zero. Primele două sunt probleme de clasificare a imaginilor și urmează același pipeline de bază: analiză exploratorie a datelor (EDA), augmentare, antrenare a unui ansamblu de modele MLP și CNN, apoi combinarea lor prin ensembling cu Test-Time Augmentation (TTA) și hard voting. A treia adaptează aceeași tematică generală (EDA, preprocesare) la text: RNN și LSTM în loc de MLP și CNN, antrenate direct ca modele individuale, fără ensembling.
 
 - **Capitolul 1** descrie setul de date **Imagebits** (10 clase de obiecte, imagini 96×96).
 - **Capitolul 2** descrie setul de date **LandPatches** (10 clase de teren, imagini de satelit, 64×64).
+- **Capitolul 3** descrie analiza de sentiment pe recenzii în limba română (clasificare binară pozitiv/negativ).
 
-Cele două seturi de date au pornit de la premise diferite: Imagebits venea cu un dezavantaj pentru modele: clasele nu erau balansate, iar LandPatches avea deja o împărțire train/val/test echilibrată. Asta a dus la decizii diferite de preprocesare, deși arhitecturile și logica de antrenare au rămas identice. Rezultatele complete se găsesc în `imagebits/results/ensemble_results_summary.csv` și `land_patches/results/land_patches_ensemble_results_summary.csv`; imaginile din acest README sunt doar o selecție reprezentativă din folderele `imagebits/results/` și `land_patches/results/`, unde se află toate graficele generate.
+Cele două seturi de date de imagini au pornit de la premise diferite: Imagebits venea cu un dezavantaj pentru modele: clasele nu erau balansate, iar LandPatches avea deja o împărțire train/val/test echilibrată. Asta a dus la decizii diferite de preprocesare, deși arhitecturile și logica de antrenare au rămas identice. Rezultatele complete se găsesc în `imagebits/results/ensemble_results_summary.csv` și `land_patches/results/land_patches_ensemble_results_summary.csv`; imaginile din acest README sunt doar o selecție reprezentativă din folderele `imagebits/results/` și `land_patches/results/`, unde se află toate graficele generate. Capitolul 3 tratează o problemă diferită ca natură a datelor (text, nu imagini) și e documentat separat mai jos, cu propriul pipeline.
 
 ## Pipeline-ul general
 
@@ -185,7 +186,7 @@ Aceleași arhitecturi ca la Imagebits (`ImprovedMLP` 512-256-128 și `CNN` cu tr
 
 ### Ensembling
 
-Aceeași procedură Top-k + Soft-Vote/TTA + Hard-Voting descrisă la Imagebits, aplicată aici cu `ensemble_configs` diferite: toate cele 5 modele pornesc de la `lr=3e-3` (față de 5e-4–7e-4 la Imagebits) și variază doar `weight_decay` între ele.
+Aceeași procedură Top-k + Soft-Vote/TTA + Hard-Voting descrisă la Imagebits, aplicată aici cu `ensemble_configs` diferite: toate cele 5 modele pornesc de la `lr=3e-3` (față de 5e-4-7e-4 la Imagebits) și variază doar `weight_decay` între ele.
 
 **De ce un learning rate mai mare.** `CosineAnnealingLR` scade rata de învățare lin, până aproape de zero, pe durata a `T_max=epochs`. Cu 80 de epoci (față de 60 la Imagebits), un punct de plecare la fel de mic ca acolo ar fi petrecut prea mult timp aproape de minimul curbei, fără progres real. Rata de 3e-3 lasă loc de scădere pe un orizont mai lung. Totuși, cum arată secțiunea de mai jos, s-a dovedit și prea agresivă pentru inițializarea CNN, care a colapsat în 3 din 5 rulări din ansamblu.
 
@@ -219,11 +220,121 @@ Modulul de selecție Top-k elimină automat modelele eșuate din ansamblu (sunt 
 
 ---
 
+## Capitolul 3: Analiză de sentiment (text românesc)
+
+```mermaid
+flowchart LR
+    A[Recenzii brute\ntext + etichetă] --> B[Curățare:\ngoale, duplicate, data leakage,\npunctuație, aducerea cuvântului la forma de bază]
+    B --> C[EDA:\ndistribuție clase, lungimi,\nn-grame frecvente]
+    C --> D[Vocabular + secvențe\n completate pana la 200 tokeni]
+    D --> E[Antrenare:\nRNN și LSTM,\nfiecare cu/fără augmentare]
+    E --> F[Evaluare pe test:\nacuratețe, matrice de confuzie]
+```
+
+### Setul de date
+
+17941 de recenzii în antrenare și 11005 în testare, etichetate binar (1 = pozitiv, 0 = negativ). 
+
+Exemplele din date arată că setul amestecă cel puțin două domenii diferite de recenzii: filme (de exemplu un text despre un documentar pe tema atacurilor din 11 septembrie) și produse electrocasnice (o recenzie despre un frigider). Amestecul de domenii explică parțial de ce vocabularul e mai variat decât într-un set strict de recenzii de film.
+
+### Curățare
+
+Înainte de orice analiză, datele au trecut prin mai multe filtre succesive, în această ordine:
+- **Valori goale**: 290 de rânduri eliminate din train, 0 din test.
+- **Data leakage între train și test**: 56 de texte identice apăreau în ambele seturi; au fost eliminate din test, ca acuratețea de test să nu fie influențată artificial de exemple deja văzute la antrenare.
+- **Duplicate aproape identice**: 1923 de rânduri din train și 322 din test aparțineau unor grupuri de texte identice după normalizare (litere mici, fără punctuație); s-a păstrat un singur exemplar din fiecare grup. Un grup avea etichete contradictorii (același text apărea de 4 ori: de 3 ori pozitiv, o dată negativ) și a fost rezolvat implicit prin păstrarea primei apariții, nu printr-un vot majoritar explicit.
+- **Punctuație finală repetată**: analiza tiparelor de final de propoziție a arătat o proporție mare de punctuație informală ("...", "!!!", ":)"), tipică recenziilor scrise de utilizatori; secvențele de punctuație repetată de la finalul textului au fost reduse la un singur caracter dominant.
+- **Lematizare cu `spaCy` (`ro_core_news_sm`)**: fiecare text a fost adus la litere mici, apoi lematizat, cu eliminarea stopword-urilor, a punctuației și a numelor proprii (`PROPN`).
+
+**De ce s-au eliminat numele proprii.** Un nume de actor, regizor sau marcă de produs poate apărea des într-o clasă doar din motive întâmplătoare, fără legătură reală cu sentimentul exprimat. Eliminarea lor forțează modelul să învețe din cuvinte cu sentiment (adjective, verbe, adverbe), nu din asocieri întâmplătoare cu nume proprii specifice.
+
+După curățare, distribuția claselor a rămas moderat dezechilibrată: train are 9934 de exemple pozitive și 6536 negative (raport 1.52), iar test are 6057 pozitive și 4729 negative (raport 1.28). Dezechilibrul nu e suficient de mare încât să justifice o strategie explicită de echilibrare, ca la Imagebits.
+
+### Analiza exploratorie
+
+![Top 20 cuvinte frecvente (antrenare)](sentiment_analysis/results/top_20_words_train.png)
+
+Cuvântul "film" domină vocabularul (aproximativ 27500 de apariții), urmat de "bun", "trebui", "lucru", "poveste", "actor", "personaj": o confirmare directă că majoritatea textelor sunt recenzii de film, nu de produse. 
+
+Bigramele cele mai frecvente ("film bun", "efect special", "notă 10", "film merita") întăresc aceeași observație.
+
+![Top 20 bigrame frecvente (antrenare)](sentiment_analysis/results/top_20_bigrams_train.png)
+
+![Distribuția caracteristicilor pe sentiment](sentiment_analysis/results/feature_distributions_by_sentiment.png)
+
+Recenziile negative sunt sistematic mai lungi decât cele pozitive: lungime medie de 304 caractere pentru negativ față de 224 pentru pozitiv în train (354 față de 309 în test), iar numărul mediu de cuvinte urmează același tipar (45 față de 33 în train). Practic, nemulțumirea are mai multă motivare scrisă decât aprecierea simplă, un semnal indirect de sentiment pe care modelul îl poate exploata chiar înainte de a ajunge la conținutul semantic propriu-zis al textului. Lungimea medie a cuvântului rămâne aproape identică între clase (5.7-5.9 caractere), semn că diferența nu vine din alegeri morfologice, ci din cât de mult scrie fiecare tip de recenzent.
+
+### Preprocesare pentru model
+
+Textele aduse la forma lor normală au fost transformate în secvențe de indici dintr-un vocabular construit din cuvintele cu frecvență minimă 2 în train: 22354 de cuvinte, plus tokenii `<PAD>` și `<UNK>`. Secvențele au fost completate sau trunchiate la 200 de tokeni; cum media reală e de 33-52 de cuvinte per recenzie, trunchierea afectează doar recenziile neobișnuit de lungi.
+
+**De ce embeddings învățate de la zero, nu FastText.** Configurația avea prevăzută încărcarea unor vectori FastText pre-antrenați pentru română (`cc.ro.300.vec`), care ar fi oferit modelului o reprezentare semantică a cuvintelor încă de la inițializare. 
+
+Fișierul nu era disponibil local, așa că stratul de embedding de 300 de dimensiuni a pornit de la inițializare aleatoare și a fost antrenat de la zero, odată cu restul rețelei (`freeze=False`). Practic, modelul trebuie să învețe simultan atât ce înseamnă fiecare cuvânt, cât și cum se leagă de sentiment.
+
+### Arhitecturi
+
+```mermaid
+flowchart LR
+    subgraph RNN["SentimentRNN_Fast"]
+        direction TB
+        ri[Embedding 300d + Dropout] --> rg["GRU bidirecțional\n1 strat, hidden=64"] --> rh["Ultima stare ascunsă\n(forward + backward)"] --> rn[LayerNorm] --> rc["Linear 128 → 64 → 2"]
+    end
+    subgraph LSTM["SentimentLSTM"]
+        direction TB
+        li[Embedding 300d + Dropout] --> ll["LSTM bidirecțional\n2 straturi, hidden=128"] --> lp["Mean-pool + Max-pool\npe toată secvența"] --> ln[LayerNorm] --> lc["Linear 512 → 64 → 2"]
+    end
+```
+
+**De ce cele două arhitecturi agregă secvența diferit.** `SentimentRNN_Fast` folosește doar ultima stare ascunsă a GRU-ului (din ambele direcții), în timp ce `SentimentLSTM` combină mean-pooling și max-pooling peste toate cele 200 de poziții ale secvenței. Într-un text de până la 200 de cuvinte, semnalul relevant pentru sentiment poate apărea oriunde: o recenzie poate începe cu laude și se poate termina cu o critică dură, sau invers. 
+
+Pooling-ul pe toată secvența dă LSTM-ului acces direct la acel semnal indiferent de poziție, în timp ce GRU-ul depinde de cât de bine reușește starea ascunsă finală să rețină informația de la începutul textului.
+
+### Antrenare
+
+Ambele arhitecturi sunt antrenate cu Adam (`lr=1e-4`, `weight_decay=5e-4`), `ReduceLROnPlateau` (factor 0.3, patience 2 epoci), early stopping cu patience 4 din maximum 20 de epoci, `CrossEntropyLoss` cu label smoothing 0.1 și gradient clipping la normă 1.0.
+
+**Augmentare de text.** Fiecare arhitectură (RNN și LSTM) e antrenată de două ori: o dată pe setul de antrenare original, o dată pe setul de antrenare dublat cu o copie augmentată a fiecărui exemplu (`augment_text_data`: ștergere aleatoare de cuvinte cu probabilitate 0.1, interschimbare aleatoare a două cuvinte cu probabilitate 0.1). Augmentarea se aplică **doar** pe porțiunea de antrenare, după separarea train/validare, ca să nu apară variante ale aceluiași text și în validare și în antrenare.
+
+**De ce `ReduceLROnPlateau` în loc de `CosineAnnealingLR`.** La Imagebits și LandPatches, numărul de epoci era fixat dinainte (60, respectiv 80), ceea ce face ca o curbă de scădere planificată pe tot orizontul de antrenare să aibă sens. 
+
+Aici antrenarea se oprește devreme, ori de câte ori validarea nu mai progresează timp de 4 epoci, deci orizontul real e imprevizibil; un scheduler care reacționează la evoluția reală a loss-ului de validare se potrivește mai bine unei antrenări scurte și neregulate decât o curbă fixă legată de un număr de epoci care s-ar putea să nu fie niciodată atins.
+
+**De ce o regularizare atât de puternică (dropout 0.6, weight decay, label smoothing, gradient clipping).** Consecință directă a embeddings-urilor învățate de la zero: cu un vocabular de peste 22000 de cuvinte și doar aproximativ 14000 de exemple de antrenare, riscul de overfitting e mare. Curbele de antrenare confirmă asta: acuratețea pe train ajunge la 89-90%, în timp ce validarea rămâne la 85%. Stack-ul de regularizare ține diferența sub control, dar nu este elimină complet.
+
+<table><tr>
+<td><img src="sentiment_analysis/results/rnn_no_augmentation_training_history.png" width="420"></td>
+<td><img src="sentiment_analysis/results/rnn_with_augmentation_training_history.png" width="420"></td>
+</tr><tr>
+<td><img src="sentiment_analysis/results/lstm_no_augmentation_training_history.png" width="420"></td>
+<td><img src="sentiment_analysis/results/lstm_with_augmentation_training_history.png" width="420"></td>
+</tr></table>
+
+### Rezultate
+
+Un ansamblu de 5 modele per arhitectură a fost testat inițial, dar nu a adus niciun câștig față de un singur model (vezi Concluzii comparative), așa că acest capitol antrenează câte un singur model RNN și LSTM, fiecare cu și fără augmentare de text, ca să se poată compara direct efectul augmentării:
+
+| Model | Augmentare | Acuratețe pe test |
+|---|---|---|
+| RNN | fără | 83.58% |
+| RNN | cu | 83.65% |
+| LSTM | fără | 82.14% |
+| LSTM | cu | **84.23%** |
+
+![Matrice de confuzie RNN fără augmentare](sentiment_analysis/results/confusion_matrix_rnn_no_augmentation.png)
+
+![Matrice de confuzie RNN cu augmentare](sentiment_analysis/results/confusion_matrix_rnn_with_augmentation.png)
+
+![Matrice de confuzie LSTM fără augmentare](sentiment_analysis/results/confusion_matrix_lstm_no_augmentation.png)
+
+![Matrice de confuzie LSTM cu augmentare](sentiment_analysis/results/confusion_matrix_lstm_with_augmentation.png)
+---
+
 ## Concluzii comparative
 
-- **CNN a fost superior MLP-ului pe ambele seturi de date**, cu o marjă semnificativă: arhitectura convoluțională exploatează structura spațială a imaginilor, pe când MLP-ul tratează fiecare pixel independent după flatten.
-- **Augmentarea a ajutat mai mult la Imagebits**, pentru care adresa direct problema volumului mic de date, **decât la LandPatches**, unde dataset-ul era deja suficient de mare. La CNN pe LandPatches, augmentarea nu a adus practic niciun câștig față de varianta fără augmentare (80.96% vs. 81.90%).
-- **Ensembling-ul cu Soft-Vote și TTA a fost constant metoda câștigătoare** față de Hard-Voting, în ambele capitole: probabilitățile medii softmax păstrează mai multă informație decât un simplu vot majoritar.
+- **CNN a fost superior MLP-ului pe ambele seturi de date de imagini**, cu o marjă semnificativă: arhitectura convoluțională exploatează structura spațială a imaginilor, pe când MLP-ul tratează fiecare pixel independent după flatten.
+- **Augmentarea a ajutat mai mult la Imagebits**, pentru care adresa direct problema volumului mic de date, **decât la LandPatches**, unde dataset-ul era deja suficient de mare. La CNN pe LandPatches, augmentarea nu a adus practic niciun câștig față de varianta fără augmentare (80.96% vs. 81.90%). La analiza de sentiment, augmentarea de text (ștergere și interschimbare aleatoare de cuvinte, aplicată doar pe porțiunea de antrenare) a adus un câștig neglijabil la RNN (83.58% → 83.65%), dar vizibil la LSTM (82.14% → 84.23%), care devine cel mai bun model al capitolului.
+- **Ensembling-ul cu Soft-Vote a fost constant metoda câștigătoare** față de Hard-Voting la Imagebits și LandPatches, dar la analiza de sentiment nu a adus niciun câștig față de un singur model, pentru că modelele din ansamblu erau prea asemănătoare între ele; din acest motiv, capitolul de analiză de sentiment antrenează acum direct câte un singur model RNN și LSTM, fără ensembling.
 
 ## Structura repository-ului
 
@@ -243,10 +354,11 @@ land_patches/
   results/                (aceeași structură ca mai sus, plus dataset_distribution/)
 
 sentiment_analysis/
-  results/
-    eda/                 (analiza exploratorie a textelor: distribuție clase, n-grame, lungimi)
-  (readme separat pentru acest capitol, în lucru)
+  results/                (EDA și rezultate de model, toate în același folder:
+                           distribuție clase, n-grame, lungimi, curbe de antrenare,
+                           matrici de confuzie)
 
+train_sentiment_analysis.csv, test_sentiment_analysis.csv (datele brute, la rădăcina proiectului)
 imagebits.ipynb           (notebook complet, cu toate output-urile)
 land_patches.ipynb        (notebook complet, cu toate output-urile)
 sentiment_analysis_romanian_text.ipynb (notebook complet, cu toate output-urile)
